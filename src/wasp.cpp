@@ -3,7 +3,7 @@
 
 #define SOLENOID_PIN 4
 #define PIR_PIN 13
-#define BUZZER_PIN 2
+#define BUZZER_PIN 12
 
 
 #define BOOT_SEQUENCE 1
@@ -13,16 +13,27 @@
 #define RESET_UNIT 5
 
 #define SOLENOD_INTERVAL 100
+#define SEEK_INTERVAL 200
+#define STRIKE_MAX 8
 
 unsigned long previous_time = millis();
 unsigned long current_time = millis();
 
 unsigned long calibration_timer = 3000; // duration of calibration
-int sensor_reading = 0;
+unsigned long currentSeekTime = 0;
+unsigned long previousSeekTime = 0;
+int sensorState = 0;
+int lastSensorState = 1;
+bool motionActive = false;
+int pirVal = 0;
 
-unsigned long solenoid_timer = 9000; // duration of solenoid operation
+
+
+unsigned long strikeInterval = 200; // duration of solenoid operation
 unsigned long previous_solenoid = 0;
 unsigned int solenoid_active = 0;
+unsigned long current_solenoid_time = 0;
+int strikeCount = 0;
 
 unsigned int buzzer_active = 0;
 unsigned long previous_tone_timer = 0;
@@ -49,39 +60,6 @@ void buzzer_play_tone(unsigned long duration, long frequency){
 
 }
 
-void solenoid_control(unsigned long interval){
-
-  unsigned long current_solenoid = millis();
-
-  if(current_solenoid - previous_solenoid > interval) {
-    previous_solenoid = current_solenoid;
-
-    if (solenoid_active == 0){
-      solenoid_active = 1;
-      analogWrite(SOLENOID_PIN, 250);
-    } else {
-      solenoid_active = 0;
-      analogWrite(SOLENOID_PIN, 0);
-    }
-
-  }
-
-}
-
-bool sense_motion(){
-
-  sensor_reading = digitalRead(PIR_PIN);
-  bool motion_detected;
-
-  if(sensor_reading == HIGH){
-    motion_detected = true;
-
-  } else {
-    motion_detected = false;
-  }
-
-  return motion_detected;
-}
 
 void transition_state(int state) {
 
@@ -105,6 +83,7 @@ void loop() {
   case BOOT_SEQUENCE:
 
     buzzer_play_tone(250, 5000);
+
     current_time = millis();
 
     if (((current_time - previous_time) > boot_timer)) {
@@ -128,29 +107,42 @@ void loop() {
 
   case SEEKING_STATE:
 
-    if(sense_motion()){
-      transition_state(INIT_CO2);
-      Serial.print("Motion detected - transitioning to INIT_CO2");
-    }
+  pirVal = digitalRead(PIR_PIN);
+
+  if(pirVal == HIGH){
+    transition_state(INIT_CO2);
+    digitalWrite(PIR_PIN,LOW);
+    Serial.print("Motion detected - transitioning to INIT_CO2");
+  }
 
   break;
 
   case INIT_CO2:
 
-    solenoid_control(SOLENOD_INTERVAL);
+  current_time = millis();
 
-    current_time = millis();
+  if(current_time - previous_time > strikeInterval) {
+    previous_time = current_time;
+    if (solenoid_active == 0){
+      solenoid_active = 1;
+      strikeCount++;
+      digitalWrite(SOLENOID_PIN, HIGH);
 
-    if (((current_time - previous_time) > solenoid_timer)) {
-        analogWrite(SOLENOID_PIN, 0);
-        noTone(BUZZER_PIN);
-        previous_time = current_time;
+    } else {
+      solenoid_active = 0;
+      digitalWrite(SOLENOID_PIN, LOW);
+      if(strikeCount >= STRIKE_MAX){
+        strikeCount = 0;
         transition_state(RESET_UNIT);
       }
+    }
+  }
 
   break;
 
   case RESET_UNIT:
+
+  transition_state(BOOT_SEQUENCE);
 
   break;
 
